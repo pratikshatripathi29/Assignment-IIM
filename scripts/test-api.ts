@@ -1,12 +1,12 @@
 async function main() {
-  console.log("=== Testing SSE API Route (Nonsense Input) ===");
+  console.log("=== Testing SSE API Route (Tesla) ===");
   try {
     const response = await fetch("http://localhost:3000/api/research", {
       method: "POST",
       headers: {
         "Content-Type": "application/json"
       },
-      body: JSON.stringify({ companyName: "asdfqwer123nonsense" })
+      body: JSON.stringify({ companyName: "Tesla" })
     });
 
     if (!response.ok) {

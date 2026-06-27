@@ -1,8 +1,7 @@
 import { z } from "zod";
 
 /**
- * Schema for the final investment decision output by the agent.
- * This is kept standalone for reuse in structured LLM calls.
+ * Schema for the final investment decision output stored in state.
  */
 export const decisionSchema = z.object({
   verdict: z.enum(["invest", "pass", "watch"]),
@@ -15,6 +14,21 @@ export const decisionSchema = z.object({
 });
 
 export type Decision = z.infer<typeof decisionSchema>;
+
+/**
+ * Robust JSON Schema-compatible structured schema passed to LLMs.
+ * Avoids Zod preprocessors/transforms (which break JSON schema generation in LangChain).
+ * Uses string fields for bulleted text, which is parsed manually into arrays.
+ */
+export const llmDecisionSchema = z.object({
+  verdict: z.enum(["invest", "pass", "watch"]),
+  confidence: z.number().describe("Confidence score as a number between 0 and 100."),
+  bullCase: z.string().describe("Key positive thesis points as a bulleted list (one per line)."),
+  bearCase: z.string().describe("Key negative concerns as a bulleted list (one per line)."),
+  risks: z.string().describe("Specific risks to monitor as a bulleted list (one per line)."),
+  reasoning: z.string().describe("Objective evaluation summary text."),
+  sources: z.array(z.string()).describe("List of exact URLs from the provided AVAILABLE VERIFIABLE SOURCE URLS list."),
+});
 
 /**
  * Shared state for the LangGraph agent researching a public company.

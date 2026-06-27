@@ -1,6 +1,18 @@
-import { ResearchState, decisionSchema } from "../../schema/state";
-import { reasoningModel, invokeWithRetry } from "../llm";
+import { ResearchState, llmDecisionSchema } from "../../schema/state";
+import { reasoningModel, fastModel, invokeWithRetry } from "../llm";
 import { HumanMessage, SystemMessage } from "@langchain/core/messages";
+
+/**
+ * Parses bulleted strings (possibly separated by newlines and containing bullet marks)
+ * into a clean array of strings.
+ */
+function parseBullets(text: string): string[] {
+  if (!text) return [];
+  return text
+    .split(/\n+/)
+    .map(s => s.replace(/^[-*•\s\d.]+\s*/, "").trim())
+    .filter(Boolean);
+}
 
 /**
  * Critic node that acts as a devil's advocate reviewer.
@@ -63,6 +75,7 @@ export async function criticNode(state: ResearchState): Promise<Partial<Research
         });
       }
     });
+
     const uniqueVerifiableUrls = Array.from(new Set(verifiableUrls));
 
     const systemPrompt = `You are a skeptical, devil's-advocate investment reviewer.
@@ -124,13 +137,33 @@ ${uniqueVerifiableUrls.length > 0 ? uniqueVerifiableUrls.map(url => `- ${url}`).
 
 Produce the revised or confirmed decision object. Select elements for the 'sources' array ONLY from the "AVAILABLE VERIFIABLE SOURCE URLS" list above. Do not include any other URLs or names.`;
 
-    const structuredLlm = reasoningModel.withStructuredOutput(decisionSchema);
-    
-    // Invoke LLM via the rate-limit retry wrapper
-    const finalizedDecision = await invokeWithRetry(structuredLlm, [
-      new SystemMessage(systemPrompt),
-      new HumanMessage(humanPrompt),
-    ]);
+    let rawLlmOutput;
+    try {
+      const structuredLlm = reasoningModel.withStructuredOutput(llmDecisionSchema);
+      rawLlmOutput = await invokeWithRetry(structuredLlm, [
+        new SystemMessage(systemPrompt),
+        new HumanMessage(humanPrompt),
+      ]);
+    } catch (e: any) {
+      console.warn("[criticNode] reasoningModel failed (likely Groq limit hit). Falling back to fastModel...", e.message || e);
+      const fallbackLlm = fastModel.withStructuredOutput(llmDecisionSchema);
+      rawLlmOutput = await invokeWithRetry(fallbackLlm, [
+        new SystemMessage(systemPrompt),
+        new HumanMessage(humanPrompt),
+      ]);
+    }
+
+    // Transform raw output to conform to the state's decisionSchema shape (arrays of strings)
+    const confidenceVal = typeof rawLlmOutput.confidence === "number" ? rawLlmOutput.confidence : parseInt(String(rawLlmOutput.confidence), 10);
+    const finalizedDecision = {
+      verdict: rawLlmOutput.verdict,
+      confidence: isNaN(confidenceVal) ? 0 : Math.min(100, Math.max(0, confidenceVal)),
+      bullCase: parseBullets(rawLlmOutput.bullCase),
+      bearCase: parseBullets(rawLlmOutput.bearCase),
+      risks: parseBullets(rawLlmOutput.risks),
+      reasoning: rawLlmOutput.reasoning,
+      sources: Array.isArray(rawLlmOutput.sources) ? rawLlmOutput.sources.map((s: any) => String(s).trim()) : [],
+    };
 
     return {
       decision: finalizedDecision,

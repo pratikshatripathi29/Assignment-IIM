@@ -104,6 +104,7 @@ export async function POST(req: NextRequest) {
           // Log server-side compilation status for debugging
           console.log("[SSE API] Stream loop complete. Accumulation keys:", Object.keys(finalState));
           console.log("[SSE API] decision present:", !!finalState.decision, "synthesis length:", finalState.synthesis?.length || 0);
+          console.log("[SSE API] errors captured:", finalState.errors);
 
           // 3. Complete State: send final decision and synthesis data
           sendEvent("complete", {

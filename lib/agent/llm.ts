@@ -1,5 +1,4 @@
 import { ChatGroq } from "@langchain/groq";
-import { BaseChatModel } from "@langchain/core/language_models/chat_models";
 
 if (!process.env.GROQ_API_KEY) {
   console.warn("llm.ts: GROQ_API_KEY is not defined in environment variables");
@@ -42,17 +41,30 @@ export async function invokeWithRetry(
       if (isRateLimit && attempt < maxRetries) {
         let sleepMs = 4000; // default fallback sleep: 4 seconds
         
-        // Parse reset time from Groq message (e.g. "try again in 15.54s" or "try again in 3.59s")
-        const match = errorMessage.match(/try again in ([\d.]+)(s|ms)/i);
+        // Parse reset time from Groq message (e.g. "try again in 15.54s", "try again in 22m14.016s")
+        const match = errorMessage.match(/try again in (?:(\d+)m)?([\d.]+)(s|ms)/i);
         if (match) {
-          const value = parseFloat(match[1]);
-          const unit = match[2];
-          sleepMs = unit === "s" ? value * 1000 : value;
+          const minutes = match[1] ? parseInt(match[1], 10) : 0;
+          const seconds = parseFloat(match[2]);
+          const unit = match[3];
+          
+          if (unit === "s") {
+            sleepMs = (minutes * 60 + seconds) * 1000;
+          } else {
+            sleepMs = (minutes * 60 * 1000) + seconds;
+          }
           sleepMs += 1000; // add a 1 second buffer
+        }
+
+        // If the rate limit wait time is too long (e.g. > 45 seconds), throw immediately to prevent timeouts
+        if (sleepMs > 45000) {
+          throw new Error(
+            `Rate limit requires a wait of ${Math.round(sleepMs / 1000)}s (Groq Daily Token Limit exceeded).`
+          );
         }
         
         console.warn(
-          `[Groq Rate Limit] Hit 429 on model ${model.id || ""}. Sleeping for ${Math.round(sleepMs)}ms before retry ${attempt}/${maxRetries}...`
+          `[Groq Rate Limit] Hit 429 on model. Sleeping for ${Math.round(sleepMs)}ms before retry ${attempt}/${maxRetries}...`
         );
         await new Promise((resolve) => setTimeout(resolve, sleepMs));
       } else {
